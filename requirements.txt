@@ -4,3 +4,4 @@ kiteconnect
 pandas
 pandas-ta
 requests
+numpy<2.0
