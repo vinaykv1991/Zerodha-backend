@@ -1,36 +1,37 @@
-# Kite Live Data API
+# Kite Trading API Service
 
-This project provides a FastAPI-based backend service to interact with the Zerodha Kite Connect API. It allows users to authenticate, fetch various types of real-time market data, and retrieve historical data for financial instruments.
+This project provides a comprehensive, FastAPI-based backend service to interact with the Zerodha Kite Connect API. It is designed to serve as a robust backend for trading applications, offering a clean, modern API for complex operations like authentication, data fetching, risk calculation, and full order management.
 
-The application is designed for easy local setup and is pre-configured for deployment on the Render platform.
+The application is built for easy local setup and is pre-configured for one-click deployment on the Render platform.
 
 ## Features
 
-- **Authentication:** A simple two-step authentication flow to get an access token from Kite Connect.
-- **Market Data:** Endpoints to fetch live snapshot data, including:
-  - Last Traded Price (LTP)
-  - Open, High, Low, Close (OHLC)
-  - Full quote details (volume, depth, etc.)
-- **Historical Data:** An endpoint to retrieve historical candle data for any instrument with a specified time frame and date range.
-- **Instrument Discovery:** An endpoint to fetch the list of all tradable instruments for a given exchange.
-- **Deployment Ready:** Includes a `render.yaml` file for seamless deployment to the Render cloud platform.
-- **Secure Configuration:** Uses environment variables to manage sensitive API keys and secrets, following security best practices.
+- **Full Authentication Flow:** Securely exchange a `request_token` for a session `access_token` and check session status.
+- **Advanced Market Data:**
+  - Get real-time quotes for any instrument.
+  - Fetch historical OHLC candle data.
+  - Search for a specific instrument to get its token and details.
+- **Risk & Target Calculation:**
+  - A `/target/calc` endpoint that uses ATR (Average True Range) to calculate realistic stop-loss and target levels for a trade, with configurable multipliers.
+  - A `/risk/check` endpoint to calculate cash risk for a potential trade.
+- **Complete Order Management:**
+  - Place, modify, and cancel orders using a consistent JSON-based request structure.
+  - Support for MIS and Bracket Orders (BO).
+  - View a list of all recent orders and current open positions.
+- **Webhook Subscriptions:** Subscribe a URL to receive real-time updates on order status changes.
+- **Deployment Ready:** Includes a `render.yaml` for seamless deployment and uses environment variables for secure management of API keys.
+- **Health Check:** A `/health` endpoint for monitoring service uptime and readiness.
 
 ---
 
-## Local Setup and Usage
-
-Follow these steps to run the application on your local machine.
+## Local Setup
 
 ### 1. Prerequisites
 
 - Python 3.8+
 - A Zerodha Kite Developer account with an `api_key` and `api_secret`.
-- Your application's redirect URL configured in your Kite Developer app settings.
 
 ### 2. Installation
-
-Clone the repository and install the required dependencies:
 
 ```bash
 git clone <repository_url>
@@ -40,7 +41,7 @@ pip install -r requirements.txt
 
 ### 3. Environment Variables
 
-The application requires your Kite API credentials to be set as environment variables.
+Set the following environment variables with your Kite API credentials:
 
 **On macOS/Linux:**
 ```bash
@@ -48,84 +49,43 @@ export KITE_API_KEY='your_api_key'
 export KITE_API_SECRET='your_api_secret'
 ```
 
-**On Windows (Command Prompt):**
-```bash
-set KITE_API_KEY=your_api_key
-set KITE_API_SECRET=your_api_secret
-```
-
 ### 4. Running the Application
-
-Once the environment variables are set, you can start the application using `uvicorn`:
 
 ```bash
 uvicorn kite_live_data.main:app --host 0.0.0.0 --port 8000
 ```
-
-The API will be available at `http://localhost:8000`.
+The API and its interactive documentation will be available at `http://localhost:8000/docs`.
 
 ---
 
-## API Endpoints
+## Authentication Flow
 
-### Authentication
+1.  **Get Login URL:** Call `GET /auth/login_url`. This will return the URL for the Kite Connect login page.
+2.  **Log In:** Open the URL in a browser and log in with your Zerodha credentials.
+3.  **Handle Callback:** After logging in, Kite will redirect you to the callback URL you configured in your Kite App settings. **You must set this URL to point to this API's `/auth/callback` endpoint.** For local testing, this would be `http://localhost:8000/auth/callback`.
+4.  **Session Created:** The `/auth/callback` endpoint automatically exchanges the received `request_token` for an `access_token` and creates a session. Your browser will show a "success" message. You can now use the other API endpoints.
 
-1.  **Login (`GET /login`)**
-    -   Open `http://localhost:8000/login` in your browser.
-    -   This will redirect you to the official Zerodha login page.
-    -   After you log in, you will be redirected to your configured redirect URL with a `request_token`.
+## API Documentation
 
-2.  **Generate Session (`GET /callback`)**
-    -   Copy the `request_token` from the redirect URL.
-    -   Make a request to the callback endpoint to generate a session:
-        `http://localhost:8000/callback?request_token=YOUR_REQUEST_TOKEN`
-    -   This will create an `access_token` that the server will use for subsequent requests.
+All endpoints are documented via the automatically generated Swagger UI. Once the server is running, visit `http://localhost:8000/docs` to see a full interactive API specification and to test the endpoints.
 
-### Market Data
+### Key Endpoints
 
-*   **Get Profile (`GET /profile`)**
-    -   Returns the user profile to confirm authentication.
-
-*   **Get Instruments (`GET /instruments/{exchange}`)**
-    -   Example: `http://localhost:8000/instruments/NSE`
-
-*   **Get LTP/OHLC/Quote (`POST /ltp`, `/ohlc`, `/quote`)**
-    -   Requires a JSON body with a list of instrument tokens.
-    -   Example with `curl`:
-        ```bash
-        curl -X POST "http://localhost:8000/ltp" \
-             -H "Content-Type: application/json" \
-             -d '{"instrument_tokens": ["256265"]}'
-        ```
-
-*   **Get Historical Data (`GET /historical-data/{instrument_token}`)**
-    -   Requires `from_date`, `to_date`, and `interval` as query parameters.
-    -   Example with `curl`:
-        ```bash
-        curl "http://localhost:8000/historical-data/256265?from_date=2024-01-01&to_date=2024-01-31&interval=day"
-        ```
+- **Auth:** `GET /auth/login_url`, `GET /auth/callback`, `GET /auth/status`
+- **Market Data:** `GET /quote`, `GET /historical`, `GET /instruments`
+- **Risk/Target:** `POST /target/calc`, `POST /risk/check`
+- **Orders:** `POST /place_order`, `POST /modify_order`, `POST /cancel_order`
+- **Positions:** `GET /orders`, `GET /positions`
+- **Webhooks:** `POST /webhook/subscribe`
+- **Monitoring:** `GET /health`
 
 ---
 
 ## Deployment on Render
 
-This repository is ready for deployment on Render using the included `render.yaml` file.
+This repository is ready for deployment on Render.
 
-### Steps:
-
-1.  **Push to a Git Repository:** Make sure your code is pushed to a GitHub or GitLab repository.
-
-2.  **Create a New Blueprint Service on Render:**
-    -   On the Render dashboard, click "New +" and select "Blueprint".
-    -   Connect your Git repository.
-    -   Render will automatically detect and use the `render.yaml` file.
-
-3.  **Add Environment Variables:**
-    -   In the service settings on Render, go to the "Environment" tab.
-    -   Add the following environment variables with your actual Kite credentials:
-        -   `KITE_API_KEY`: `your_api_key`
-        -   `KITE_API_SECRET`: `your_api_secret`
-
-4.  **Deploy:**
-    -   Click "Create New Service". Render will build and deploy the application.
-    -   Your API will be available at the URL provided by Render.
+1.  **Push to Git:** Ensure your code is in a GitHub or GitLab repository.
+2.  **Create Blueprint Service:** On the Render dashboard, create a new "Blueprint" service and connect your repository. Render will use the `render.yaml` file automatically.
+3.  **Add Environment Variables:** In your service's "Environment" tab on Render, add your `KITE_API_KEY` and `KITE_API_SECRET`.
+4.  **Deploy.** Render will build and deploy the service. Your API will be available at the URL provided by Render.
