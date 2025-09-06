@@ -9,5 +9,7 @@ services:
         value: "YOUR_API_KEY_HERE"
       - key: KITE_API_SECRET
         value: "YOUR_API_SECRET_HERE"
+      - key: INTERNAL_API_KEY
+        value: "your_strong_secret_api_key_here" # Change this to a strong, random key
       - key: PYTHON_VERSION
         value: "3.10" # Or your desired python version
