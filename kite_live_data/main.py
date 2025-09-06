@@ -121,7 +121,7 @@ def auth_callback(request_token: str):
     You must set your Kite App's Redirect URL to this endpoint.
     """
     try:
-        data = kite.generate_session(request_token, api_secret=api_secret)
+        data = kite.generate_session(request_token, api_secret=KITE_API_SECRET)
         session.update(access_token=data["access_token"], user_id=data["user_id"], expires_at=get_token_expiry_time())
         kite.set_access_token(session["access_token"])
         return """<html><body><h1>Authentication Successful!</h1><p>You can now close this window and use the API.</p></body></html>"""
