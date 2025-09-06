@@ -142,12 +142,13 @@ def subscribe_webhook(request: WebhookRequest, auth: None = Depends(check_kite_a
 @app.get("/quote", response_model=QuoteResponse, dependencies=[Depends(verify_api_key)])
 def get_quote(symbol: str, auth: None = Depends(check_kite_auth)):
     """
-    Gets a quote for a given symbol. If exchange is not specified, defaults to NSE.
+    Gets a quote for a given symbol. Handles symbols with or without exchange prefix, case-insensitively.
     """
-    formatted_symbol = symbol
-    if ":" not in symbol:
+    if ":" in symbol:
+        exchange, tradingsymbol = symbol.split(":")
+        formatted_symbol = f"{exchange.upper()}:{tradingsymbol.upper()}"
+    else:
         # If no exchange is specified, default to NSE.
-        # A more robust implementation might search for the instrument first.
         formatted_symbol = f"NSE:{symbol.upper()}"
 
     try:
@@ -156,8 +157,15 @@ def get_quote(symbol: str, auth: None = Depends(check_kite_auth)):
         if not instrument_quote:
             raise HTTPException(status_code=404, detail=f"Quote not found for symbol: {formatted_symbol}")
 
-        # The quote response from kite has 'tradingsymbol' which we can use
-        return QuoteResponse(symbol=instrument_quote['tradingsymbol'], **instrument_quote)
+        # Explicitly map fields to avoid KeyErrors and unexpected data
+        return QuoteResponse(
+            symbol=formatted_symbol,
+            last_price=instrument_quote['last_price'],
+            volume=instrument_quote['volume'],
+            timestamp=instrument_quote['timestamp']
+        )
+    except KeyError as e:
+        raise HTTPException(status_code=500, detail=f"Unexpected response format from Kite API. Missing key: {e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
