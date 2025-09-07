@@ -50,6 +50,25 @@ def test_get_quote_not_found(authenticated_client: TestClient, test_api_key: str
     assert response.status_code == 404
     assert "Quote not found" in response.json()["detail"]
 
+def test_get_quote_for_index(authenticated_client: TestClient, test_api_key: str, mocker):
+    """Tests fetching a quote for a major index."""
+    input_symbol = "nifty 50"
+    expected_formatted_symbol = "INDICES:NIFTY 50"
+    mock_depth = {"buy": [], "sell": []}
+    mock_quote = {
+        expected_formatted_symbol: {
+            "instrument_token": 256265, "last_price": 18000.0, "volume": 0,
+            "timestamp": datetime.now().isoformat(), "tradingsymbol": "NIFTY 50", "depth": mock_depth
+        }
+    }
+    mocker.patch("kite_live_data.main.kite.quote", return_value=mock_quote)
+    headers = {"x-api-key": test_api_key}
+    response = authenticated_client.get(f"/quote?symbol={input_symbol}", headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["symbol"] == expected_formatted_symbol
+    assert data["last_price"] == 18000.0
+
 # --- /historical endpoint tests ---
 def test_get_historical_success(authenticated_client: TestClient, test_api_key: str, mocker):
     mock_historical = [{"date": datetime.now().isoformat(), "open": 100, "high": 110, "low": 90, "close": 105, "volume": 1000}]

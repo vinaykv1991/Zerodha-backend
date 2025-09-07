@@ -118,13 +118,23 @@ def get_auth_status():
     is_connected = bool(session.get("access_token") and session.get("expires_at") and session["expires_at"] > datetime.datetime.now())
     return AuthStatusResponse(connected=is_connected, expires_at=session.get("expires_at"))
 
+# List of common indices to handle them separately
+INDICES = ['NIFTY 50', 'NIFTY BANK', 'INDIA VIX']
+
 @app.get("/quote", response_model=QuoteResponse, dependencies=[Depends(verify_api_key)])
 def get_quote(symbol: str, auth: None = Depends(check_kite_auth)):
-    if ":" in symbol:
-        exchange, tradingsymbol = symbol.split(":")
-        formatted_symbol = f"{exchange.upper()}:{tradingsymbol.upper()}"
+
+    upper_symbol = symbol.upper()
+
+    # Check if the symbol is a known index
+    if upper_symbol in INDICES:
+        formatted_symbol = f"INDICES:{upper_symbol}"
+    elif ":" in upper_symbol:
+        exchange, tradingsymbol = upper_symbol.split(":")
+        formatted_symbol = f"{exchange}:{tradingsymbol}"
     else:
-        formatted_symbol = f"NSE:{symbol.upper()}"
+        # Default to NSE for stocks if no exchange is provided
+        formatted_symbol = f"NSE:{upper_symbol}"
     try:
         quote_data = kite.quote(formatted_symbol)
         instrument_quote = quote_data.get(formatted_symbol)
