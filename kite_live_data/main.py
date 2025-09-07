@@ -42,6 +42,15 @@ class HealthResponse(BaseModel): ok: bool; uptime: str
 class AuthStatusResponse(BaseModel): connected: bool; expires_at: datetime.datetime | None = None
 class DepthLevel(BaseModel): quantity: int; price: float; orders: int
 class Depth(BaseModel): buy: List[DepthLevel]; sell: List[DepthLevel]
+
+
+class OHLCResponse(BaseModel):
+    open: float
+    high: float
+    low: float
+    close: float
+
+
 class QuoteResponse(BaseModel):
     symbol: str
     last_price: float
@@ -52,6 +61,15 @@ class QuoteResponse(BaseModel):
     sell_quantity: int
     last_quantity: int
     average_price: float
+    instrument_token: int
+    last_trade_time: datetime.datetime | None = None
+    oi: float
+    oi_day_high: float
+    oi_day_low: float
+    net_change: float
+    lower_circuit_limit: float
+    upper_circuit_limit: float
+    ohlc: OHLCResponse
 class Candle(BaseModel): time: datetime.datetime; open: float; high: float; low: float; close: float; volume: int
 class InstrumentResponse(BaseModel): tradingsymbol: str; token: int; lot_size: int; exchange: str
 class TargetCalcRequest(BaseModel):
@@ -167,7 +185,16 @@ def get_quote(symbol: str, auth: None = Depends(check_kite_auth)):
             buy_quantity=instrument_quote['buy_quantity'],
             sell_quantity=instrument_quote['sell_quantity'],
             last_quantity=instrument_quote['last_quantity'],
-            average_price=instrument_quote['average_price']
+            average_price=instrument_quote['average_price'],
+            instrument_token=instrument_quote['instrument_token'],
+            last_trade_time=instrument_quote.get('last_trade_time'),
+            oi=instrument_quote['oi'],
+            oi_day_high=instrument_quote['oi_day_high'],
+            oi_day_low=instrument_quote['oi_day_low'],
+            net_change=instrument_quote['net_change'],
+            lower_circuit_limit=instrument_quote['lower_circuit_limit'],
+            upper_circuit_limit=instrument_quote['upper_circuit_limit'],
+            ohlc=instrument_quote['ohlc']
         )
         logging.info(f"Returning quote for {formatted_symbol}")
         return response
