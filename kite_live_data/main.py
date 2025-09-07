@@ -75,7 +75,7 @@ class QuoteResponse(BaseModel):
 class Candle(BaseModel): time: datetime.datetime; open: float; high: float; low: float; close: float; volume: int
 class InstrumentResponse(BaseModel): tradingsymbol: str; token: int; lot_size: int; exchange: str
 class TargetCalcRequest(BaseModel):
-    symbol: str; entry_price: float; sl_atr_multiplier: float = 1.5; target_atr_multiplier: float = 3.0
+    symbol: str; entry_price: float; sl_atr_multiplier: float = 1.5; target_atr_multiplier: float = 3.0; interval: str = "day"
 class TargetCalcResponse(BaseModel): entry: float; stop_loss: float; target1: float; target2: float; rr_ratio: float
 class OrderLeg(BaseModel): type: str; value: float
 class PlaceOrderRequest(BaseModel):
@@ -90,8 +90,10 @@ class OrderResponse(BaseModel): order_id: str; status: str
 class WebhookRequest(BaseModel): url: HttpUrl
 class WebhookResponse(BaseModel): ok: bool; webhook_id: str
 class Position(BaseModel): symbol: str; qty: int; avg_price: float; pnl: float
-class RiskCheckRequest(BaseModel): entry: float; stop_loss: float; quantity: int
-class RiskCheckResponse(BaseModel): cash_risk: float; margin_required: float; rr_ratio: float | None = None
+class RiskCheckRequest(BaseModel):
+    entry: float; stop_loss: float; quantity: int | None = None; risk_capital: float | None = None
+class RiskCheckResponse(BaseModel):
+    cash_risk: float; margin_required: float; rr_ratio: float | None = None; suggested_quantity: int | None = None
 
 # --- Security & Dependencies ---
 async def verify_api_key(api_key: str = Security(api_key_header)):
@@ -274,23 +276,59 @@ def search_instruments(query: str, auth: None = Depends(check_kite_auth)):
 def calculate_target(request: TargetCalcRequest, auth: None = Depends(check_kite_auth)):
     instrument_token = get_instrument_token(request.symbol)
     if not instrument_token: raise HTTPException(status_code=404, detail=f"Instrument not found: {request.symbol}")
-    to_date = datetime.date.today(); from_date = to_date - datetime.timedelta(days=45)
+
+    # --- ATR Calculation Logic ---
+    interval_map = {"5m": "5minute", "15m": "15minute", "1h": "60minute", "day": "day"}
+    if request.interval not in interval_map:
+        raise HTTPException(status_code=400, detail=f"Invalid interval. Use one of: {list(interval_map.keys())}")
+
+    kite_interval = interval_map[request.interval]
+    to_date = datetime.date.today()
+
+    # Adjust lookback period based on interval for efficiency
+    if kite_interval == "day":
+        from_date = to_date - datetime.timedelta(days=45)
+    elif kite_interval in ["60minute", "15minute"]:
+        from_date = to_date - datetime.timedelta(days=15)
+    else: # 5minute
+        from_date = to_date - datetime.timedelta(days=7)
+
     try:
-        hist_data = kite.historical_data(instrument_token, from_date.strftime('%Y-%m-%d'), to_date.strftime('%Y-%m-%d'), "day")
+        hist_data = kite.historical_data(instrument_token, from_date.strftime('%Y-%m-%d'), to_date.strftime('%Y-%m-%d'), kite_interval)
         if not hist_data: raise HTTPException(status_code=404, detail="Could not fetch historical data for ATR.")
-        df = pd.DataFrame(hist_data); df.set_index('date', inplace=True)
+
+        df = pd.DataFrame(hist_data)
+        if 'date' in df.columns:
+            df.set_index('date', inplace=True)
+
+        # Calculate ATR
         atr = df.ta.atr(length=14)
-        if atr is None or atr.empty: raise HTTPException(status_code=500, detail="Could not calculate ATR.")
+        if atr is None or atr.empty or pd.isna(atr.iloc[-1]):
+            raise HTTPException(status_code=500, detail="Could not calculate ATR. Check if there is enough historical data.")
+
         latest_atr = atr.iloc[-1]
+
+        # Calculate SL and Target
         stop_loss_points = request.sl_atr_multiplier * latest_atr
         target_points = request.target_atr_multiplier * latest_atr
+
         stop_loss = round(request.entry_price - stop_loss_points, 2)
         target1 = round(request.entry_price + target_points, 2)
+
         risk = request.entry_price - stop_loss
         reward = target1 - request.entry_price
         rr_ratio = round(reward / risk, 2) if risk > 0 else 0
-        return TargetCalcResponse(entry=request.entry_price, stop_loss=stop_loss, target1=target1, target2=round(target1 + (target_points / 2), 2), rr_ratio=rr_ratio)
-    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
+
+        return TargetCalcResponse(
+            entry=request.entry_price,
+            stop_loss=stop_loss,
+            target1=target1,
+            target2=round(target1 + (target_points / 2), 2),
+            rr_ratio=rr_ratio
+        )
+    except Exception as e:
+        logging.error(f"Error in target calculation for {request.symbol}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"An error occurred during target calculation: {str(e)}")
 @app.get("/orders", dependencies=[Depends(verify_api_key)])
 def get_orders(auth: None = Depends(check_kite_auth)):
     try: return kite.orders()
@@ -303,9 +341,36 @@ def get_positions(auth: None = Depends(check_kite_auth)):
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 @app.post("/risk/check", response_model=RiskCheckResponse, dependencies=[Depends(verify_api_key)])
 def check_risk(request: RiskCheckRequest, auth: None = Depends(check_kite_auth)):
-    cash_risk = (request.entry - request.stop_loss) * request.quantity
-    margin_required = request.entry * request.quantity
-    return RiskCheckResponse(cash_risk=round(cash_risk, 2), margin_required=round(margin_required, 2), rr_ratio=None)
+    if request.quantity is None and request.risk_capital is None:
+        raise HTTPException(status_code=400, detail="Either 'quantity' or 'risk_capital' must be provided.")
+    if request.quantity is not None and request.risk_capital is not None:
+        raise HTTPException(status_code=400, detail="Provide either 'quantity' or 'risk_capital', not both.")
+
+    risk_per_share = request.entry - request.stop_loss
+    if risk_per_share <= 0:
+        raise HTTPException(status_code=400, detail="Stop loss must be less than entry price.")
+
+    final_quantity = 0
+    suggested_quantity: int | None = None
+
+    if request.risk_capital:
+        suggested_quantity = int(request.risk_capital / risk_per_share)
+        final_quantity = suggested_quantity
+    elif request.quantity:
+        final_quantity = request.quantity
+
+    if final_quantity <= 0:
+        raise HTTPException(status_code=400, detail="Calculated quantity is zero or less. Adjust risk capital or SL.")
+
+    cash_risk = risk_per_share * final_quantity
+    margin_required = request.entry * final_quantity
+
+    return RiskCheckResponse(
+        cash_risk=round(cash_risk, 2),
+        margin_required=round(margin_required, 2),
+        suggested_quantity=suggested_quantity,
+        rr_ratio=None # RR ratio is context-dependent and better calculated with a target
+    )
 @app.post("/webhook/subscribe", response_model=WebhookResponse, dependencies=[Depends(verify_api_key)])
 def subscribe_webhook(request: WebhookRequest, auth: None = Depends(check_kite_auth)):
     webhook_id = str(uuid.uuid4())
