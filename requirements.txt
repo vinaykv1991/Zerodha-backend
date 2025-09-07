@@ -4,4 +4,3 @@ kiteconnect
 pandas
 pandas-ta==0.3.14b0
 requests
-numpy<2.0
