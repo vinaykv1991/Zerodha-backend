@@ -42,8 +42,34 @@ class HealthResponse(BaseModel): ok: bool; uptime: str
 class AuthStatusResponse(BaseModel): connected: bool; expires_at: datetime.datetime | None = None
 class DepthLevel(BaseModel): quantity: int; price: float; orders: int
 class Depth(BaseModel): buy: List[DepthLevel]; sell: List[DepthLevel]
+
+
+class OHLCResponse(BaseModel):
+    open: float
+    high: float
+    low: float
+    close: float
+
+
 class QuoteResponse(BaseModel):
-    symbol: str; last_price: float; volume: int; timestamp: datetime.datetime; depth: Depth
+    symbol: str
+    last_price: float
+    volume: int | None = None
+    timestamp: datetime.datetime
+    depth: Depth | None = None
+    buy_quantity: int | None = None
+    sell_quantity: int | None = None
+    last_quantity: int | None = None
+    average_price: float | None = None
+    instrument_token: int
+    last_trade_time: datetime.datetime | None = None
+    oi: float | None = None
+    oi_day_high: float | None = None
+    oi_day_low: float | None = None
+    net_change: float
+    lower_circuit_limit: float | None = None
+    upper_circuit_limit: float | None = None
+    ohlc: OHLCResponse
 class Candle(BaseModel): time: datetime.datetime; open: float; high: float; low: float; close: float; volume: int
 class InstrumentResponse(BaseModel): tradingsymbol: str; token: int; lot_size: int; exchange: str
 class TargetCalcRequest(BaseModel):
@@ -123,34 +149,62 @@ INDICES = ['NIFTY 50', 'NIFTY BANK', 'INDIA VIX']
 
 @app.get("/quote", response_model=QuoteResponse, dependencies=[Depends(verify_api_key)])
 def get_quote(symbol: str, auth: None = Depends(check_kite_auth)):
-
+    """
+    Fetches a full market quote for a given symbol, including depth, volume, and other details.
+    """
+    logging.info(f"Received quote request for symbol: {symbol}")
     upper_symbol = symbol.upper()
 
-    # Check if the symbol is a known index
+    # Determine the correct exchange and symbol format
     if upper_symbol in INDICES:
         formatted_symbol = f"INDICES:{upper_symbol}"
     elif ":" in upper_symbol:
         exchange, tradingsymbol = upper_symbol.split(":")
         formatted_symbol = f"{exchange}:{tradingsymbol}"
     else:
-        # Default to NSE for stocks if no exchange is provided
         formatted_symbol = f"NSE:{upper_symbol}"
+    logging.info(f"Formatted symbol: {formatted_symbol}")
+
     try:
+        # Fetch quote from Kite API
         quote_data = kite.quote(formatted_symbol)
+        logging.debug(f"Kite quote data: {quote_data}")
+
         instrument_quote = quote_data.get(formatted_symbol)
         if not instrument_quote:
+            logging.error(f"Quote not found for symbol: {formatted_symbol}")
             raise HTTPException(status_code=404, detail=f"Quote not found for symbol: {formatted_symbol}")
-        return QuoteResponse(
+
+        # Create response object
+        response = QuoteResponse(
             symbol=formatted_symbol,
-            last_price=instrument_quote['last_price'],
-            volume=instrument_quote['volume'],
-            timestamp=instrument_quote['timestamp'],
-            depth=instrument_quote['depth']
+            last_price=instrument_quote.get('last_price'),
+            volume=instrument_quote.get('volume'),
+            timestamp=instrument_quote.get('timestamp'),
+            depth=instrument_quote.get('depth'),
+            buy_quantity=instrument_quote.get('buy_quantity'),
+            sell_quantity=instrument_quote.get('sell_quantity'),
+            last_quantity=instrument_quote.get('last_quantity'),
+            average_price=instrument_quote.get('average_price'),
+            instrument_token=instrument_quote.get('instrument_token'),
+            last_trade_time=instrument_quote.get('last_trade_time'),
+            oi=instrument_quote.get('oi'),
+            oi_day_high=instrument_quote.get('oi_day_high'),
+            oi_day_low=instrument_quote.get('oi_day_low'),
+            net_change=instrument_quote.get('net_change'),
+            lower_circuit_limit=instrument_quote.get('lower_circuit_limit'),
+            upper_circuit_limit=instrument_quote.get('upper_circuit_limit'),
+            ohlc=instrument_quote.get('ohlc')
         )
+        logging.info(f"Returning quote for {formatted_symbol}")
+        return response
+
     except HTTPException:
+        # Re-raise HTTPException to let FastAPI handle it
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.error(f"An unexpected error occurred while fetching quote for {symbol}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
 
 @app.post("/place_order", response_model=OrderResponse, dependencies=[Depends(verify_api_key)])
 def place_order(request: PlaceOrderRequest, background_tasks: BackgroundTasks, auth: None = Depends(check_kite_auth)):
