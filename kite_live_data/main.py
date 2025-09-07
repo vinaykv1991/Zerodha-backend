@@ -54,21 +54,21 @@ class OHLCResponse(BaseModel):
 class QuoteResponse(BaseModel):
     symbol: str
     last_price: float
-    volume: int
+    volume: int | None = None
     timestamp: datetime.datetime
-    depth: Depth
-    buy_quantity: int
-    sell_quantity: int
-    last_quantity: int
-    average_price: float
+    depth: Depth | None = None
+    buy_quantity: int | None = None
+    sell_quantity: int | None = None
+    last_quantity: int | None = None
+    average_price: float | None = None
     instrument_token: int
     last_trade_time: datetime.datetime | None = None
-    oi: float
-    oi_day_high: float
-    oi_day_low: float
+    oi: float | None = None
+    oi_day_high: float | None = None
+    oi_day_low: float | None = None
     net_change: float
-    lower_circuit_limit: float
-    upper_circuit_limit: float
+    lower_circuit_limit: float | None = None
+    upper_circuit_limit: float | None = None
     ohlc: OHLCResponse
 class Candle(BaseModel): time: datetime.datetime; open: float; high: float; low: float; close: float; volume: int
 class InstrumentResponse(BaseModel): tradingsymbol: str; token: int; lot_size: int; exchange: str
@@ -178,23 +178,23 @@ def get_quote(symbol: str, auth: None = Depends(check_kite_auth)):
         # Create response object
         response = QuoteResponse(
             symbol=formatted_symbol,
-            last_price=instrument_quote['last_price'],
-            volume=instrument_quote['volume'],
-            timestamp=instrument_quote['timestamp'],
-            depth=instrument_quote['depth'],
-            buy_quantity=instrument_quote['buy_quantity'],
-            sell_quantity=instrument_quote['sell_quantity'],
-            last_quantity=instrument_quote['last_quantity'],
-            average_price=instrument_quote['average_price'],
-            instrument_token=instrument_quote['instrument_token'],
+            last_price=instrument_quote.get('last_price'),
+            volume=instrument_quote.get('volume'),
+            timestamp=instrument_quote.get('timestamp'),
+            depth=instrument_quote.get('depth'),
+            buy_quantity=instrument_quote.get('buy_quantity'),
+            sell_quantity=instrument_quote.get('sell_quantity'),
+            last_quantity=instrument_quote.get('last_quantity'),
+            average_price=instrument_quote.get('average_price'),
+            instrument_token=instrument_quote.get('instrument_token'),
             last_trade_time=instrument_quote.get('last_trade_time'),
-            oi=instrument_quote['oi'],
-            oi_day_high=instrument_quote['oi_day_high'],
-            oi_day_low=instrument_quote['oi_day_low'],
-            net_change=instrument_quote['net_change'],
-            lower_circuit_limit=instrument_quote['lower_circuit_limit'],
-            upper_circuit_limit=instrument_quote['upper_circuit_limit'],
-            ohlc=instrument_quote['ohlc']
+            oi=instrument_quote.get('oi'),
+            oi_day_high=instrument_quote.get('oi_day_high'),
+            oi_day_low=instrument_quote.get('oi_day_low'),
+            net_change=instrument_quote.get('net_change'),
+            lower_circuit_limit=instrument_quote.get('lower_circuit_limit'),
+            upper_circuit_limit=instrument_quote.get('upper_circuit_limit'),
+            ohlc=instrument_quote.get('ohlc')
         )
         logging.info(f"Returning quote for {formatted_symbol}")
         return response

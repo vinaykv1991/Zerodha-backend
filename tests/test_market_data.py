@@ -63,18 +63,17 @@ def test_get_quote_not_found(authenticated_client: TestClient, test_api_key: str
     assert "Quote not found" in response.json()["detail"]
 
 def test_get_quote_for_index(authenticated_client: TestClient, test_api_key: str, mocker):
-    """Tests fetching a quote for a major index."""
+    """Tests fetching a quote for a major index, which has fewer data points."""
     input_symbol = "nifty 50"
     expected_formatted_symbol = "INDICES:NIFTY 50"
-    mock_depth = {"buy": [], "sell": []}
     mock_ohlc = {"open": 17900, "high": 18100, "low": 17850, "close": 17950}
     mock_quote = {
         expected_formatted_symbol: {
-            "instrument_token": 256265, "last_price": 18000.0, "volume": 0,
-            "timestamp": datetime.now().isoformat(), "tradingsymbol": "NIFTY 50", "depth": mock_depth,
-            "buy_quantity": 0, "sell_quantity": 0, "last_quantity": 0, "average_price": 0,
-            "last_trade_time": datetime.now().isoformat(), "oi": 0, "oi_day_high": 0, "oi_day_low": 0,
-            "net_change": 50.0, "lower_circuit_limit": 17000.0, "upper_circuit_limit": 19000.0, "ohlc": mock_ohlc
+            "instrument_token": 256265,
+            "timestamp": datetime.now().isoformat(),
+            "last_price": 18000.50,
+            "net_change": 50.25,
+            "ohlc": mock_ohlc,
         }
     }
     mocker.patch("kite_live_data.main.kite.quote", return_value=mock_quote)
@@ -83,7 +82,11 @@ def test_get_quote_for_index(authenticated_client: TestClient, test_api_key: str
     assert response.status_code == 200
     data = response.json()
     assert data["symbol"] == expected_formatted_symbol
-    assert data["last_price"] == 18000.0
+    assert data["last_price"] == 18000.50
+    assert data["volume"] is None
+    assert data["depth"] is None
+    assert data["oi"] is None
+    assert data["ohlc"]["open"] == 17900
 
 # --- /historical endpoint tests ---
 def test_get_historical_success(authenticated_client: TestClient, test_api_key: str, mocker):
