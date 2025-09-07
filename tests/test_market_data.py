@@ -11,7 +11,8 @@ def test_get_quote_success(authenticated_client: TestClient, test_api_key: str, 
     mock_quote = {
         symbol: {
             "instrument_token": 123, "last_price": 1500.0, "volume": 100000,
-            "timestamp": datetime.now().isoformat(), "tradingsymbol": "INFY", "depth": mock_depth
+            "timestamp": datetime.now().isoformat(), "tradingsymbol": "INFY", "depth": mock_depth,
+            "buy_quantity": 100, "sell_quantity": 200, "last_quantity": 10, "average_price": 1499.5
         }
     }
     mocker.patch("kite_live_data.main.kite.quote", return_value=mock_quote)
@@ -23,6 +24,7 @@ def test_get_quote_success(authenticated_client: TestClient, test_api_key: str, 
     assert data["last_price"] == 1500.0
     assert "depth" in data
     assert data["depth"]["buy"][0]["price"] == 1499.0
+    assert data["buy_quantity"] == 100
 
 def test_get_quote_smart_symbol(authenticated_client: TestClient, test_api_key: str, mocker):
     """Tests the smart symbol handling (no exchange prefix)."""
@@ -32,7 +34,8 @@ def test_get_quote_smart_symbol(authenticated_client: TestClient, test_api_key: 
     mock_quote = {
         expected_formatted_symbol: {
             "instrument_token": 123, "last_price": 1500.0, "volume": 100000,
-            "timestamp": datetime.now().isoformat(), "tradingsymbol": "INFY", "depth": mock_depth
+            "timestamp": datetime.now().isoformat(), "tradingsymbol": "INFY", "depth": mock_depth,
+            "buy_quantity": 0, "sell_quantity": 0, "last_quantity": 0, "average_price": 0
         }
     }
     mocker.patch("kite_live_data.main.kite.quote", return_value=mock_quote)
@@ -58,7 +61,8 @@ def test_get_quote_for_index(authenticated_client: TestClient, test_api_key: str
     mock_quote = {
         expected_formatted_symbol: {
             "instrument_token": 256265, "last_price": 18000.0, "volume": 0,
-            "timestamp": datetime.now().isoformat(), "tradingsymbol": "NIFTY 50", "depth": mock_depth
+            "timestamp": datetime.now().isoformat(), "tradingsymbol": "NIFTY 50", "depth": mock_depth,
+            "buy_quantity": 0, "sell_quantity": 0, "last_quantity": 0, "average_price": 0
         }
     }
     mocker.patch("kite_live_data.main.kite.quote", return_value=mock_quote)
