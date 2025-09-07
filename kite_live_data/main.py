@@ -70,6 +70,8 @@ class QuoteResponse(BaseModel):
     lower_circuit_limit: float | None = None
     upper_circuit_limit: float | None = None
     ohlc: OHLCResponse
+
+
 class Candle(BaseModel): time: datetime.datetime; open: float; high: float; low: float; close: float; volume: int
 class InstrumentResponse(BaseModel): tradingsymbol: str; token: int; lot_size: int; exchange: str
 class TargetCalcRequest(BaseModel):
