@@ -272,6 +272,30 @@ def search_instruments(query: str, auth: None = Depends(check_kite_auth)):
         if query == inst['tradingsymbol'].upper():
             return InstrumentResponse(tradingsymbol=inst['tradingsymbol'], token=inst['instrument_token'], lot_size=inst['lot_size'], exchange=inst['exchange'])
     raise HTTPException(status_code=404, detail=f"Instrument '{query}' not found.")
+
+@app.get("/indices", response_model=List[InstrumentResponse], dependencies=[Depends(verify_api_key)])
+def get_all_indices(auth: None = Depends(check_kite_auth)):
+    """
+    Retrieves a list of all available indices from the INDICES exchange.
+    """
+    update_instrument_cache_if_needed()
+
+    indices = [
+        InstrumentResponse(
+            tradingsymbol=inst['tradingsymbol'],
+            token=inst['instrument_token'],
+            lot_size=inst['lot_size'],
+            exchange=inst['exchange']
+        )
+        for inst in instrument_cache["instruments"]
+        if inst['exchange'] == 'INDICES'
+    ]
+
+    if not indices:
+        # This might happen if the cache is empty or if there's an issue fetching instruments.
+        raise HTTPException(status_code=404, detail="No indices found. The instrument cache might be empty or outdated.")
+
+    return indices
 @app.post("/target/calc", response_model=TargetCalcResponse, dependencies=[Depends(verify_api_key)])
 def calculate_target(request: TargetCalcRequest, auth: None = Depends(check_kite_auth)):
     instrument_token = get_instrument_token(request.symbol)
