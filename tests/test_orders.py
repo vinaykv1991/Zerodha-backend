@@ -17,13 +17,49 @@ def test_calculate_target_success(authenticated_client: TestClient, test_api_key
 
 # --- /risk/check endpoint tests ---
 
-def test_risk_check_success(authenticated_client: TestClient, test_api_key: str):
-    """Tests a successful risk check calculation."""
-    request_data = {"entry": 100.0, "stop_loss": 98.0, "quantity": 50}
+def test_risk_check_success_with_quantity(authenticated_client: TestClient, test_api_key: str, mocker):
+    """Tests a successful risk check with a given quantity."""
+    # Mock the order_margins call
+    mocker.patch("kite_live_data.main.kite.order_margins", return_value=[{"total": 25.0}])
+
+    request_data = {"symbol": "NSE:RELIANCE", "entry": 100.0, "stop_loss": 98.0, "quantity": 50}
     headers = {"x-api-key": test_api_key}
     response = authenticated_client.post("/risk/check", headers=headers, json=request_data)
+
     assert response.status_code == 200
-    assert response.json()["cash_risk"] == 100.0
+    json_response = response.json()
+    assert json_response["cash_risk"] == 100.0  # (100 - 98) * 50
+    assert json_response["margin_required"] == 1250.0  # 25.0 * 50
+    assert json_response["suggested_quantity"] is None
+
+def test_risk_check_success_with_risk_capital(authenticated_client: TestClient, test_api_key: str, mocker):
+    """Tests a successful risk check with a given risk capital."""
+    mocker.patch("kite_live_data.main.kite.order_margins", return_value=[{"total": 20.0}])
+
+    request_data = {"symbol": "NSE:INFY", "entry": 1500.0, "stop_loss": 1490.0, "risk_capital": 500.0}
+    headers = {"x-api-key": test_api_key}
+    response = authenticated_client.post("/risk/check", headers=headers, json=request_data)
+
+    assert response.status_code == 200
+    json_response = response.json()
+    assert json_response["suggested_quantity"] == 50  # 500 / (1500 - 1490)
+    assert json_response["cash_risk"] == 500.0  # (1500 - 1490) * 50
+    assert json_response["margin_required"] == 1000.0  # 20.0 * 50
+
+def test_risk_check_zero_margin_fallback(authenticated_client: TestClient, test_api_key: str, mocker):
+    """Tests the fallback mechanism when order_margins returns zero."""
+    mocker.patch("kite_live_data.main.kite.order_margins", return_value=[{"total": 0}])
+    mock_quote = {"NSE:SBIN": {"last_price": 500.0}}
+    mocker.patch("kite_live_data.main.kite.quote", return_value=mock_quote)
+
+    request_data = {"symbol": "NSE:SBIN", "entry": 500.0, "stop_loss": 495.0, "quantity": 10}
+    headers = {"x-api-key": test_api_key}
+    response = authenticated_client.post("/risk/check", headers=headers, json=request_data)
+
+    assert response.status_code == 200
+    json_response = response.json()
+    # Fallback margin is 20% of last_price (500 * 0.20 = 100)
+    assert json_response["margin_required"] == 1000.0  # 100 * 10
 
 # --- Order Management endpoint tests ---
 

@@ -108,3 +108,36 @@ def test_search_instruments_success(authenticated_client: TestClient, test_api_k
     response = authenticated_client.get("/instruments?query=RELIANCE", headers=headers)
     assert response.status_code == 200
     assert response.json()["tradingsymbol"] == "RELIANCE"
+
+# --- /indices endpoint tests ---
+def test_get_all_indices_success(authenticated_client: TestClient, test_api_key: str, mocker):
+    """Tests successful retrieval of all indices."""
+    mock_instruments = [
+        {"tradingsymbol": "NIFTY 50", "instrument_token": 256265, "lot_size": 0, "exchange": "INDICES"},
+        {"tradingsymbol": "NIFTY BANK", "instrument_token": 260105, "lot_size": 0, "exchange": "INDICES"},
+        {"tradingsymbol": "RELIANCE", "instrument_token": 738561, "lot_size": 1, "exchange": "NSE"},
+    ]
+    # We mock the cache directly as it's the most reliable way to inject test data
+    mocker.patch.dict("kite_live_data.main.instrument_cache", {"instruments": mock_instruments, "last_updated": datetime.now()})
+
+    headers = {"x-api-key": test_api_key}
+    response = authenticated_client.get("/indices", headers=headers)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 2
+    assert data[0]["tradingsymbol"] == "NIFTY 50"
+    assert data[1]["exchange"] == "INDICES"
+
+def test_get_all_indices_no_indices_found(authenticated_client: TestClient, test_api_key: str, mocker):
+    """Tests the case where no indices are found in the cache."""
+    mock_instruments = [
+        {"tradingsymbol": "RELIANCE", "instrument_token": 738561, "lot_size": 1, "exchange": "NSE"},
+    ]
+    mocker.patch.dict("kite_live_data.main.instrument_cache", {"instruments": mock_instruments, "last_updated": datetime.now()})
+
+    headers = {"x-api-key": test_api_key}
+    response = authenticated_client.get("/indices", headers=headers)
+
+    assert response.status_code == 404
+    assert "No indices found" in response.json()["detail"]

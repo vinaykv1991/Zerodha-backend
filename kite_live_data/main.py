@@ -91,7 +91,7 @@ class WebhookRequest(BaseModel): url: HttpUrl
 class WebhookResponse(BaseModel): ok: bool; webhook_id: str
 class Position(BaseModel): symbol: str; qty: int; avg_price: float; pnl: float
 class RiskCheckRequest(BaseModel):
-    entry: float; stop_loss: float; quantity: int | None = None; risk_capital: float | None = None
+    symbol: str; entry: float; stop_loss: float; quantity: int | None = None; risk_capital: float | None = None; transaction_type: str = "BUY"
 class RiskCheckResponse(BaseModel):
     cash_risk: float; margin_required: float; rr_ratio: float | None = None; suggested_quantity: int | None = None
 
@@ -272,6 +272,30 @@ def search_instruments(query: str, auth: None = Depends(check_kite_auth)):
         if query == inst['tradingsymbol'].upper():
             return InstrumentResponse(tradingsymbol=inst['tradingsymbol'], token=inst['instrument_token'], lot_size=inst['lot_size'], exchange=inst['exchange'])
     raise HTTPException(status_code=404, detail=f"Instrument '{query}' not found.")
+
+@app.get("/indices", response_model=List[InstrumentResponse], dependencies=[Depends(verify_api_key)])
+def get_all_indices(auth: None = Depends(check_kite_auth)):
+    """
+    Retrieves a list of all available indices from the INDICES exchange.
+    """
+    update_instrument_cache_if_needed()
+
+    indices = [
+        InstrumentResponse(
+            tradingsymbol=inst['tradingsymbol'],
+            token=inst['instrument_token'],
+            lot_size=inst['lot_size'],
+            exchange=inst['exchange']
+        )
+        for inst in instrument_cache["instruments"]
+        if inst['exchange'] == 'INDICES'
+    ]
+
+    if not indices:
+        # This might happen if the cache is empty or if there's an issue fetching instruments.
+        raise HTTPException(status_code=404, detail="No indices found. The instrument cache might be empty or outdated.")
+
+    return indices
 @app.post("/target/calc", response_model=TargetCalcResponse, dependencies=[Depends(verify_api_key)])
 def calculate_target(request: TargetCalcRequest, auth: None = Depends(check_kite_auth)):
     instrument_token = get_instrument_token(request.symbol)
@@ -341,35 +365,82 @@ def get_positions(auth: None = Depends(check_kite_auth)):
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 @app.post("/risk/check", response_model=RiskCheckResponse, dependencies=[Depends(verify_api_key)])
 def check_risk(request: RiskCheckRequest, auth: None = Depends(check_kite_auth)):
+    # Validate that either quantity or risk_capital is provided, but not both
     if request.quantity is None and request.risk_capital is None:
         raise HTTPException(status_code=400, detail="Either 'quantity' or 'risk_capital' must be provided.")
     if request.quantity is not None and request.risk_capital is not None:
         raise HTTPException(status_code=400, detail="Provide either 'quantity' or 'risk_capital', not both.")
 
+    # Validate stop_loss against entry price
     risk_per_share = request.entry - request.stop_loss
     if risk_per_share <= 0:
-        raise HTTPException(status_code=400, detail="Stop loss must be less than entry price.")
+        raise HTTPException(status_code=400, detail="Stop loss must be less than the entry price.")
 
+    # --- Margin Calculation ---
+    try:
+        exchange, tradingsymbol = request.symbol.split(':')
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid symbol format. Expected 'EXCHANGE:TRADINGSYMBOL'.")
+
+    order_params = [{
+        "exchange": exchange,
+        "tradingsymbol": tradingsymbol,
+        "transaction_type": request.transaction_type,
+        "variety": "regular",
+        "product": "MIS",  # For intraday margin
+        "order_type": "MARKET",
+        "quantity": 1,
+        "price": request.entry  # Use entry price for margin calculation
+    }]
+
+    try:
+        margin_info = kite.order_margins(order_params)
+        margin_per_share = margin_info[0].get('total', 0)
+        if margin_per_share == 0:
+            # Fallback to a reasonable default if margin is zero (e.g., for indices or unsupported segments)
+            # Fetching full value as a fallback
+            quote = kite.quote(f"{exchange}:{tradingsymbol}")
+            last_price = quote[f"{exchange}:{tradingsymbol}"].get('last_price')
+            if not last_price:
+                raise HTTPException(status_code=404, detail=f"Could not fetch last price for {request.symbol}")
+            # Assuming a conservative 20% margin if API returns 0, which is common for non-equity intraday products
+            margin_per_share = last_price * 0.20
+            logging.warning(f"Margin API returned 0 for {request.symbol}. Falling back to 20% of last price.")
+
+    except Exception as e:
+        logging.error(f"Failed to get margin for {request.symbol}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Could not calculate margin: {str(e)}")
+
+    # --- Quantity Calculation ---
     final_quantity = 0
     suggested_quantity: int | None = None
 
     if request.risk_capital:
-        suggested_quantity = int(request.risk_capital / risk_per_share)
+        # Suggest quantity based on risk capital and risk per share
+        if risk_per_share > 0:
+            suggested_quantity = int(request.risk_capital / risk_per_share)
+        else:
+            suggested_quantity = 0
         final_quantity = suggested_quantity
     elif request.quantity:
         final_quantity = request.quantity
 
     if final_quantity <= 0:
-        raise HTTPException(status_code=400, detail="Calculated quantity is zero or less. Adjust risk capital or SL.")
+        raise HTTPException(status_code=400, detail="Calculated quantity is zero or less. Adjust risk capital or stop loss.")
 
+    # --- Final Calculations ---
     cash_risk = risk_per_share * final_quantity
-    margin_required = request.entry * final_quantity
+    margin_required = margin_per_share * final_quantity
+
+    # Calculate RR ratio if applicable (though it's better handled with a target)
+    # This is a placeholder as the response model expects it.
+    rr_ratio = None
 
     return RiskCheckResponse(
         cash_risk=round(cash_risk, 2),
         margin_required=round(margin_required, 2),
         suggested_quantity=suggested_quantity,
-        rr_ratio=None # RR ratio is context-dependent and better calculated with a target
+        rr_ratio=rr_ratio
     )
 @app.post("/webhook/subscribe", response_model=WebhookResponse, dependencies=[Depends(verify_api_key)])
 def subscribe_webhook(request: WebhookRequest, auth: None = Depends(check_kite_auth)):
